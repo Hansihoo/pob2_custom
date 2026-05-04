@@ -75,7 +75,7 @@ class Candidate:
 
 
 def fail(message: str) -> None:
-    raise SystemExit(f"ERROR: {message}")
+    raise SystemExit(f"[FAIL] {message}")
 
 
 def read_text(path: Path) -> str:
@@ -214,6 +214,7 @@ def load_csv(path: Path):
         fail(f"missing translation csv: {path.relative_to(ROOT)}")
     rows: dict[tuple[str, str], dict[str, str]] = {}
     duplicates: list[tuple[str, str]] = []
+    missing_required: list[int] = []
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.reader(handle)
         try:
@@ -226,11 +227,13 @@ def load_csv(path: Path):
             if len(row) != len(HEADER):
                 fail(f"{path.relative_to(ROOT)}:{line_number} has {len(row)} columns")
             record = dict(zip(HEADER, row))
+            if record["domain"] == "" or record["key"] == "" or record["en"] == "":
+                missing_required.append(line_number)
             key = (record["domain"], record["key"])
             if key in rows:
                 duplicates.append(key)
             rows[key] = record
-    return rows, duplicates
+    return rows, duplicates, missing_required
 
 
 def validate_file(name: str, candidates: list[Candidate]) -> dict[str, int | str]:
@@ -239,7 +242,7 @@ def validate_file(name: str, candidates: list[Candidate]) -> dict[str, int | str
     allowed_domains = config["domains"]
     wanted_candidates = [candidate for candidate in candidates if candidate.domain in allowed_domains]
     wanted = {(candidate.domain, candidate.key): candidate for candidate in wanted_candidates}
-    rows, duplicates = load_csv(path)
+    rows, duplicates, missing_required = load_csv(path)
 
     missing = 0
     stale = 0
@@ -263,6 +266,7 @@ def validate_file(name: str, candidates: list[Candidate]) -> dict[str, int | str
         "blank": blank,
         "orphaned": orphaned,
         "duplicates": len(duplicates),
+        "required": len(missing_required),
         "path": str(path.relative_to(SRC)),
     }
 
@@ -296,14 +300,15 @@ def main() -> int:
         result = validate_file(name, candidates)
         print(
             "{name}: expected={expected} missing={missing} stale={stale} "
-            "blank={blank} orphaned={orphaned} duplicates={duplicates} path={path}".format(**result)
+            "blank={blank} orphaned={orphaned} duplicates={duplicates} "
+            "required={required} path={path}".format(**result)
         )
         failures += int(result["missing"]) + int(result["stale"]) + int(result["blank"])
-        failures += int(result["orphaned"]) + int(result["duplicates"])
+        failures += int(result["orphaned"]) + int(result["duplicates"]) + int(result["required"])
 
-    gem_rows, _ = load_csv(CSV_FILES["Gems"]["path"])
-    base_rows, _ = load_csv(CSV_FILES["ItemBases"]["path"])
-    tree_rows, _ = load_csv(CSV_FILES["Tree"]["path"])
+    gem_rows, _, _ = load_csv(CSV_FILES["Gems"]["path"])
+    base_rows, _, _ = load_csv(CSV_FILES["ItemBases"]["path"])
+    tree_rows, _, _ = load_csv(CSV_FILES["Tree"]["path"])
     expect_sample(gem_rows, "gem", "Metadata/Items/Gems/SkillGemIceNova", "Ice Nova")
     expect_sample(base_rows, "base", "Wooden Club", "Wooden Club")
     expect_sample(tree_rows, "tree_dn", "30", "Gathering Winds")
