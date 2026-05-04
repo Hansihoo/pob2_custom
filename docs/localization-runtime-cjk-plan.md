@@ -1,5 +1,9 @@
 # PoB2 Korean Runtime Development Plan
 
+Agent execution guide: `docs/localization-runtime-agent-workflow.md`
+
+Use this file for the overall roadmap. When assigning coding agents, give them one stage from `docs/localization-runtime-agent-workflow.md` instead of this whole roadmap.
+
 이 문서는 CSV 기반 한국어 번역 레이어 다음 단계인 **한글 런타임 표시 지원**을 개발하기 위한 진행 기준이다.
 목표는 Codex가 여러 번 이어서 작업하더라도 방향을 잃지 않도록, 단계별 개발 범위와 산출물, 검증 기준을 고정하는 것이다.
 
