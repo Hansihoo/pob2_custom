@@ -10,6 +10,14 @@ Windows machines can verify the localization layer without installing Busted by 
 powershell -ExecutionPolicy Bypass -File tools/verify-localization.ps1
 ```
 
+Hosted coding agents or Linux containers that do not have PowerShell can run the cloud-friendly static/sync verifier:
+
+```bash
+python3 tools/verify-localization-cloud.py
+```
+
+This does not replace the Windows runtime smoke test, but it is enough for cloud agents to validate CSV shape, synchronization with generated PoB data, sample translations, and canonical English preservation.
+
 This checks Lua syntax for the localization touch points, then runs a standalone smoke test for:
 
 - CSV synchronization with the current generated PoB data

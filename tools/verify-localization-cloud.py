@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Cloud-friendly localization verification.
 
-PowerShell/Lua 런타임이 없는 클라우드 환경에서 Stage 0 검증을 수행한다.
+This verifier intentionally avoids PowerShell, Windows DLL loading, and Lua.
+It is meant for hosted coding agents that usually run in a Linux container.
+The Windows verifier remains the stronger runtime smoke path.
 """
 
 from __future__ import annotations
@@ -12,22 +14,57 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 TRANSLATIONS = SRC / "Data" / "Translations" / "ko-KR"
-HEADER = ["domain", "key", "en", "ko", "aliases"]
 
 ITEM_TYPES = [
-    "axe", "bow", "claw", "crossbow", "dagger", "fishing", "flail", "focus", "mace", "spear",
-    "staff", "sceptre", "sword", "talisman", "wand", "body", "gloves", "helmet", "boots", "shield",
-    "quiver", "amulet", "ring", "belt", "jewel", "flask", "incursionlimb",
+    "axe",
+    "bow",
+    "claw",
+    "crossbow",
+    "dagger",
+    "fishing",
+    "flail",
+    "focus",
+    "mace",
+    "spear",
+    "staff",
+    "sceptre",
+    "sword",
+    "talisman",
+    "wand",
+    "body",
+    "gloves",
+    "helmet",
+    "boots",
+    "shield",
+    "quiver",
+    "amulet",
+    "ring",
+    "belt",
+    "jewel",
+    "flask",
+    "incursionlimb",
 ]
 
 CSV_FILES = {
-    "Gems": {"path": TRANSLATIONS / "Gems.csv", "domains": {"gem"}},
-    "ItemBases": {"path": TRANSLATIONS / "ItemBases.csv", "domains": {"base"}},
-    "Tree": {"path": TRANSLATIONS / "Tree.csv", "domains": {"tree_dn", "tree_sd"}},
+    "Gems": {
+        "path": TRANSLATIONS / "Gems.csv",
+        "domains": {"gem"},
+    },
+    "ItemBases": {
+        "path": TRANSLATIONS / "ItemBases.csv",
+        "domains": {"base"},
+    },
+    "Tree": {
+        "path": TRANSLATIONS / "Tree.csv",
+        "domains": {"tree_dn", "tree_sd"},
+    },
 }
+
+HEADER = ["domain", "key", "en", "ko", "aliases"]
 
 
 @dataclass(frozen=True)
@@ -50,9 +87,16 @@ def read_text(path: Path) -> str:
 def lua_unescape(value: str) -> str:
     def repl(match: re.Match[str]) -> str:
         token = match.group(1)
-        mapping = {"n": "\n", "r": "\r", "t": "\t", '"': '"', "\\": "\\"}
-        if token in mapping:
-            return mapping[token]
+        if token == "n":
+            return "\n"
+        if token == "r":
+            return "\r"
+        if token == "t":
+            return "\t"
+        if token == '"':
+            return '"'
+        if token == "\\":
+            return "\\"
         if token.isdigit():
             return chr(int(token, 10))
         return token
@@ -64,7 +108,8 @@ def find_matching_brace(text: str, open_index: int) -> int:
     depth = 0
     in_string: str | None = None
     escaped = False
-    for index in range(open_index, len(text)):
+    index = open_index
+    while index < len(text):
         char = text[index]
         if in_string:
             if escaped:
@@ -73,16 +118,18 @@ def find_matching_brace(text: str, open_index: int) -> int:
                 escaped = True
             elif char == in_string:
                 in_string = None
-            continue
-        if char in {"'", '"'}:
-            in_string = char
-        elif char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                return index
+        else:
+            if char in {"'", '"'}:
+                in_string = char
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return index
+        index += 1
     fail("unterminated Lua table while parsing generated data")
+    return -1
 
 
 def iter_lua_blocks(text: str, pattern: str):
@@ -96,23 +143,25 @@ def iter_lua_blocks(text: str, pattern: str):
 
 def extract_gems() -> list[Candidate]:
     text = read_text(SRC / "Data" / "Gems.lua")
-    out: list[Candidate] = []
-    for match, block in iter_lua_blocks(text, r'\n\t\["((?:\\.|[^"\\])*)"\]\s*=\s*\{'):
+    candidates: list[Candidate] = []
+    pattern = r'\n\t\["((?:\\.|[^"\\])*)"\]\s*=\s*\{'
+    for match, block in iter_lua_blocks(text, pattern):
         gem_id = lua_unescape(match.group(1))
         name_match = re.search(r'\n\s*name\s*=\s*"((?:\\.|[^"\\])*)"', block)
         if name_match:
-            out.append(Candidate("gem", gem_id, lua_unescape(name_match.group(1))))
-    return out
+            candidates.append(Candidate("gem", gem_id, lua_unescape(name_match.group(1))))
+    return candidates
 
 
 def extract_item_bases() -> list[Candidate]:
-    out: list[Candidate] = []
+    candidates: list[Candidate] = []
     for item_type in ITEM_TYPES:
-        text = read_text(SRC / "Data" / "Bases" / f"{item_type}.lua")
+        path = SRC / "Data" / "Bases" / f"{item_type}.lua"
+        text = read_text(path)
         for match in re.finditer(r'itemBases\["((?:\\.|[^"\\])*)"\]\s*=', text):
             name = lua_unescape(match.group(1))
-            out.append(Candidate("base", name, name))
-    return out
+            candidates.append(Candidate("base", name, name))
+    return candidates
 
 
 def latest_tree_version() -> str:
@@ -132,17 +181,20 @@ def extract_tree() -> list[Candidate]:
     nodes_match = re.search(r"(?m)^\tnodes=\{", text)
     if not nodes_match:
         fail(f"could not find nodes table in TreeData/{version}/tree.lua")
-    out: list[Candidate] = []
-    sub = text[nodes_match.start() :]
-    for match, block in iter_lua_blocks(sub, r'\n\t\t\[(\d+)\]\s*=\s*\{'):
+    nodes_index = nodes_match.start()
+    candidates: list[Candidate] = []
+    pattern = r'\n\t\t\[(\d+)\]\s*=\s*\{'
+    for match, block in iter_lua_blocks(text[nodes_index:], pattern):
+        table_id = match.group(1)
         name_match = re.search(r'(?m)^\t\t\tname\s*=\s*"((?:\\.|[^"\\])*)"', block)
         if not name_match:
             continue
-        node_id_match = re.search(r'(?m)^\t\t\t(?:skill|id)\s*=\s*(\d+)\s*,?', block)
-        if not node_id_match:
+        skill_match = re.search(r'(?m)^\t\t\tskill\s*=\s*(\d+)\s*,?', block)
+        id_match = re.search(r'(?m)^\t\t\tid\s*=\s*(\d+)\s*,?', block)
+        node_id = skill_match.group(1) if skill_match else (id_match.group(1) if id_match else None)
+        if node_id is None:
             continue
-        node_id = node_id_match.group(1)
-        out.append(Candidate("tree_dn", node_id, lua_unescape(name_match.group(1))))
+        candidates.append(Candidate("tree_dn", node_id, lua_unescape(name_match.group(1))))
 
         stats_match = re.search(r'(?m)^\t\t\tstats\s*=\s*\{', block)
         if not stats_match:
@@ -151,15 +203,18 @@ def extract_tree() -> list[Candidate]:
         stats_close = find_matching_brace(block, stats_open)
         stats_block = block[stats_open : stats_close + 1]
         for stat_match in re.finditer(r'\[(\d+)\]\s*=\s*"((?:\\.|[^"\\])*)"', stats_block):
-            out.append(Candidate("tree_sd", f"{node_id}:{stat_match.group(1)}", lua_unescape(stat_match.group(2))))
-    return out
+            stat_index = stat_match.group(1)
+            stat_text = lua_unescape(stat_match.group(2))
+            candidates.append(Candidate("tree_sd", f"{node_id}:{stat_index}", stat_text))
+    return candidates
 
 
 def load_csv(path: Path):
     if not path.exists():
         fail(f"missing translation csv: {path.relative_to(ROOT)}")
     rows: dict[tuple[str, str], dict[str, str]] = {}
-    duplicates = 0
+    duplicates: list[tuple[str, str]] = []
+    missing_required: list[int] = []
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.reader(handle)
         try:
@@ -172,18 +227,26 @@ def load_csv(path: Path):
             if len(row) != len(HEADER):
                 fail(f"{path.relative_to(ROOT)}:{line_number} has {len(row)} columns")
             record = dict(zip(HEADER, row))
+            if record["domain"] == "" or record["key"] == "" or record["en"] == "":
+                missing_required.append(line_number)
             key = (record["domain"], record["key"])
             if key in rows:
-                duplicates += 1
+                duplicates.append(key)
             rows[key] = record
-    return rows, duplicates
+    return rows, duplicates, missing_required
 
 
-def validate_file(name: str, candidates: list[Candidate]) -> int:
+def validate_file(name: str, candidates: list[Candidate]) -> dict[str, int | str]:
     config = CSV_FILES[name]
-    wanted = {(c.domain, c.key): c for c in candidates if c.domain in config["domains"]}
-    rows, duplicates = load_csv(config["path"])
-    missing = stale = blank = 0
+    path = config["path"]
+    allowed_domains = config["domains"]
+    wanted_candidates = [candidate for candidate in candidates if candidate.domain in allowed_domains]
+    wanted = {(candidate.domain, candidate.key): candidate for candidate in wanted_candidates}
+    rows, duplicates, missing_required = load_csv(path)
+
+    missing = 0
+    stale = 0
+    blank = 0
     for key, candidate in wanted.items():
         row = rows.get(key)
         if row is None:
@@ -193,9 +256,19 @@ def validate_file(name: str, candidates: list[Candidate]) -> int:
             stale += 1
         if row["ko"] == "":
             blank += 1
+
     orphaned = sum(1 for key in rows if key not in wanted)
-    print(f"{name}: expected={len(wanted)} missing={missing} stale={stale} blank={blank} orphaned={orphaned} duplicates={duplicates}")
-    return missing + stale + blank + orphaned + duplicates
+    return {
+        "name": name,
+        "expected": len(wanted),
+        "missing": missing,
+        "stale": stale,
+        "blank": blank,
+        "orphaned": orphaned,
+        "duplicates": len(duplicates),
+        "required": len(missing_required),
+        "path": str(path.relative_to(SRC)),
+    }
 
 
 def expect_sample(rows: dict[tuple[str, str], dict[str, str]], domain: str, key: str, english: str) -> None:
@@ -209,24 +282,33 @@ def expect_sample(rows: dict[tuple[str, str], dict[str, str]], domain: str, key:
 
 
 def main() -> int:
-    for doc in [
+    required_docs = [
         ROOT / "docs" / "localization-runtime-agent-workflow.md",
         ROOT / "docs" / "localization-runtime-cjk-plan.md",
         ROOT / "docs" / "localization.md",
-    ]:
+    ]
+    for doc in required_docs:
         if not doc.exists():
             fail(f"missing required doc: {doc.relative_to(ROOT)}")
 
     candidates = extract_gems() + extract_item_bases() + extract_tree()
-    print(f"Localization candidates: {len({(c.domain, c.key) for c in candidates})}")
+    unique_candidates = {(candidate.domain, candidate.key) for candidate in candidates}
+    print(f"Localization candidates: {len(unique_candidates)}")
 
     failures = 0
     for name in ("Gems", "ItemBases", "Tree"):
-        failures += validate_file(name, candidates)
+        result = validate_file(name, candidates)
+        print(
+            "{name}: expected={expected} missing={missing} stale={stale} "
+            "blank={blank} orphaned={orphaned} duplicates={duplicates} "
+            "required={required} path={path}".format(**result)
+        )
+        failures += int(result["missing"]) + int(result["stale"]) + int(result["blank"])
+        failures += int(result["orphaned"]) + int(result["duplicates"]) + int(result["required"])
 
-    gem_rows, _ = load_csv(CSV_FILES["Gems"]["path"])
-    base_rows, _ = load_csv(CSV_FILES["ItemBases"]["path"])
-    tree_rows, _ = load_csv(CSV_FILES["Tree"]["path"])
+    gem_rows, _, _ = load_csv(CSV_FILES["Gems"]["path"])
+    base_rows, _, _ = load_csv(CSV_FILES["ItemBases"]["path"])
+    tree_rows, _, _ = load_csv(CSV_FILES["Tree"]["path"])
     expect_sample(gem_rows, "gem", "Metadata/Items/Gems/SkillGemIceNova", "Ice Nova")
     expect_sample(base_rows, "base", "Wooden Club", "Wooden Club")
     expect_sample(tree_rows, "tree_dn", "30", "Gathering Winds")
