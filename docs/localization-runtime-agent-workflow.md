@@ -31,6 +31,18 @@ After development, run the required checks, fix failures, and report review note
 - 새 시즌 대응은 코드 수정이 아니라 CSV 갱신/검증 중심이어야 한다.
 - binary/runtime/font 파일을 바꾸는 단계는 반드시 manifest 영향과 라이선스 기록을 함께 남긴다.
 
+## Cloud Agent Rules
+
+Claude, GitHub Codespaces, remote coding agent처럼 Linux 컨테이너에서 실행되는 환경은 Windows PowerShell, `runtime/lua51.dll`, MSVC `cl`이 없을 수 있다.
+이 경우 그 도구가 없다는 이유만으로 Stage 전체를 중단하지 않는다.
+
+- PowerShell이 없으면 `python3 tools/verify-localization-cloud.py`를 사용한다.
+- `python3` 명령이 없고 `python`만 있으면 `python tools/verify-localization-cloud.py`를 사용한다.
+- Windows 전용 검증은 "Windows 후속 검증 필요"로 기록한다.
+- `cl` 부재는 클라우드 환경에서 blocker가 아니다. Stage 1에서는 MSVC 빌드가 불가능하다는 환경 사실로 기록한다.
+- GitHub fetch/clone이 네트워크 정책으로 막히면, 현재 작업공간 안에서 가능한 문서/스크립트/PoB2 Lua 작업을 계속 진행한다.
+- Stage를 멈추는 blocker는 현재 작업공간 안에서 더 이상 수행 가능한 로컬 작업이 없을 때만 인정한다.
+
 ## Stage 0: Lock Current Lua Localization Baseline
 
 목표:
@@ -63,11 +75,25 @@ Fix:
 
 Review:
 
-- 다음 명령을 실행한다.
+Windows/PoB 로컬 런타임 환경에서는 다음 명령을 실행한다.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/verify-localization.ps1
 powershell -ExecutionPolicy Bypass -File tools/update-localization-csv.ps1 -Check
+git diff --check
+```
+
+Claude 같은 클라우드/Linux 환경에서는 다음 명령을 실행한다.
+
+```bash
+python3 tools/verify-localization-cloud.py
+git diff --check
+```
+
+`python3`가 없고 `python`만 있으면 다음 명령을 사용한다.
+
+```bash
+python tools/verify-localization-cloud.py
 git diff --check
 ```
 
@@ -76,11 +102,12 @@ git diff --check
 - 통과한 검증 로그 요약
 - 필요한 경우 Lua/CSV/검증 스크립트 수정
 - 다음 단계가 런타임 작업으로 넘어가도 되는지 판단
+- 클라우드 환경에서 Windows 전용 검증을 실행하지 못했다면 후속 Windows 검증 필요 여부 기록
 
 완료 기준:
 
-- localization verification이 통과한다.
-- CSV sync check가 통과한다.
+- Windows 환경에서는 localization verification과 CSV sync check가 통과한다.
+- 클라우드 환경에서는 `tools/verify-localization-cloud.py`가 통과한다.
 - working tree의 변경이 Stage 0 범위로만 제한된다.
 
 ## Stage 1: Prepare SimpleGraphic Runtime Workspace
@@ -119,11 +146,23 @@ Fix:
 
 Review:
 
+Windows 개발 환경에서는 다음 명령을 실행한다.
+
 ```powershell
 git --version
 cmake --version
 ninja --version
 cl
+```
+
+클라우드/Linux 환경에서는 다음 명령을 실행하고, 없는 도구는 blocker가 아니라 환경 기록으로 남긴다.
+
+```bash
+git --version
+cmake --version || true
+ninja --version || true
+cc --version || true
+c++ --version || true
 ```
 
 산출물:
