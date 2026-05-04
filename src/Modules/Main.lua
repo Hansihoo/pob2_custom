@@ -16,6 +16,7 @@ local m_pi = math.pi
 
 LoadModule("GameVersions")
 LoadModule("Modules/Common")
+LoadModule("Modules/Localization")
 LoadModule("Modules/Data")
 LoadModule("Modules/ModTools")
 LoadModule("Modules/ItemTools")
@@ -336,6 +337,9 @@ end
 
 function main:Shutdown()
 	self:CallMode("Shutdown")
+	if loc then
+		loc:WriteMissing(self.userPath)
+	end
 	self:SaveSettings()
 end
 

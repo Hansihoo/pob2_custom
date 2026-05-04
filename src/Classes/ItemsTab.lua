@@ -2810,11 +2810,12 @@ function ItemsTabClass:AddItemTooltip(tooltip, item, slot, dbMode)
 	tooltip.color = rarityCode
 	self:SetTooltipHeaderInfluence(tooltip, item)
 	-- Item name
+	local displayBaseName = loc and loc:Display("base", item.baseName, item.baseName) or item.baseName
 	if item.title then
 		tooltip:AddLine(fontSizeTitle, rarityCode..item.title, "FONTIN SC")
-		tooltip:AddLine(fontSizeTitle, rarityCode..item.baseName:gsub(" %(.+%)",""), "FONTIN SC")
+		tooltip:AddLine(fontSizeTitle, rarityCode..displayBaseName:gsub(" %(.+%)",""), "FONTIN SC")
 	else
-		tooltip:AddLine(fontSizeTitle, rarityCode..item.namePrefix..item.baseName:gsub(" %(.+%)","")..item.nameSuffix, "FONTIN SC")
+		tooltip:AddLine(fontSizeTitle, rarityCode..item.namePrefix..displayBaseName:gsub(" %(.+%)","")..item.nameSuffix, "FONTIN SC")
 	end
 
 	tooltip:AddSeparator(10)

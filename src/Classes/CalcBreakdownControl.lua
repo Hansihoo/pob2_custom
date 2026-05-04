@@ -413,14 +413,15 @@ function CalcBreakdownClass:AddModSection(sectionData, modList)
 			if nodeId then
 				local nodeIdNumber = tonumber(nodeId)
 				local node = build.spec.nodes[nodeIdNumber] or build.spec.switchableNodes[nodeIdNumber] or build.spec.tree.nodes[nodeIdNumber]
-				row.sourceName = node.dn
+				row.sourceName = node.displayName or node.dn
 				row.sourceNameNode = node
 			end
 		elseif sourceType == "Many Sources" then
 			row.sourceName = row.mod.source:match("Many Sources:(.+)")
 		elseif sourceType == "Skill" then
 			-- Extract skill name
-			row.sourceName = build.data.skills[row.mod.source:match("Skill:(.+)")].name
+			local skill = build.data.skills[row.mod.source:match("Skill:(.+)")]
+			row.sourceName = skill.displayName or skill.name
 		elseif sourceType == "Pantheon" then
 			row.sourceName = row.mod.source:match("Pantheon:(.+)")
 		elseif sourceType == "Spectre" then

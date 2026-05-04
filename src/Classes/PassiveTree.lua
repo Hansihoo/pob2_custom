@@ -255,6 +255,9 @@ local PassiveTreeClass = newClass("PassiveTree", function(self, treeVersion)
 
 		self:ProcessNode(node)
 	end
+	if loc then
+		loc:DecorateTree(self)
+	end
 
 	-- Pregenerate the polygons for the node connector lines
 	self.connectors = { }

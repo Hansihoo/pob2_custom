@@ -13,8 +13,12 @@ local m_floor = math.floor
 
 local toolTipText = "Prefix tag searches with a colon and exclude tags with a dash. e.g. :fire:lightning:-cold:area"
 
+local function gemDisplayName(gemData)
+	return gemData and (gemData.displayName or gemData.name) or ""
+end
+
 local GemSelectClass = newClass("GemSelectControl", "EditControl", function(self, anchor, rect, skillsTab, index, changeFunc, forceTooltip)
-	self.EditControl(anchor, rect, nil, nil, "^ %a':-")
+	self.EditControl(anchor, rect, nil, nil, main.unicode and "%c" or "^ %a':-")
 	self.controls.scrollBar = new("ScrollBarControl", { "TOPRIGHT", self, "TOPRIGHT" }, {-1, 0, 18, 0}, (self.height - 4) * 4)
 	self.controls.scrollBar.y = function()
 		local width, height = self:GetSize()
@@ -140,7 +144,7 @@ function GemSelectClass:BuildList(buf)
 		for i, pattern in ipairs(patternList) do
 			local matchList = { }
 			for gemId, gemData in pairs(self.gems) do
-				if self:FilterSupport(gemId, gemData) and not added[gemId] and ((" "..gemData.name:lower()):match(pattern)) then
+				if self:FilterSupport(gemId, gemData) and not added[gemId] and ((" "..(gemData.searchText or gemData.name):lower()):match(pattern)) then
 					addThisGem = true
 					if #tagsList > 0 then
 						for _, tag in ipairs(tagsList) do
@@ -329,8 +333,8 @@ function GemSelectClass:SortGemList(gemList)
 			if self.skillsTab.sortGemsByDPS and sortCache.dps[a] ~= sortCache.dps[b] then
 				return sortCache.dps[a] > sortCache.dps[b]
 			else
-				local nameA = (self.gems[a] and self.gems[a].name) or a
-				local nameB = (self.gems[b] and self.gems[b].name) or b
+				local nameA = (self.gems[a] and gemDisplayName(self.gems[a])) or a
+				local nameB = (self.gems[b] and gemDisplayName(self.gems[b])) or b
 				return nameA < nameB
 			end
 		else
@@ -347,10 +351,11 @@ function GemSelectClass:UpdateGem(setText, addUndo)
 		self.gemId = nil
 	end
 	self.gemName = self.gemId and self.gems[self.gemId].name or ""
+	self.gemDisplayName = self.gemId and gemDisplayName(self.gems[self.gemId]) or ""
 	if setText then
-		self:SetText(self.gemName)
+		self:SetText(self.gemDisplayName)
 	end
-	self.gemChangeFunc(self.gemId and self.gemId:gsub("%w+:", ""), addUndo and self.gemName ~= self.initialBuf)
+	self.gemChangeFunc(self.gemId and self.gemId:gsub("%w+:", ""), addUndo and self.gemDisplayName ~= self.initialBuf)
 end
 
 function GemSelectClass:ScrollSelIntoView()
@@ -429,7 +434,7 @@ function GemSelectClass:Draw(viewPort, noTooltip)
 					SetDrawColor(colorCodes.INTELLIGENCE)
 				end
 			end
-			local gemText = gemData and gemData.name or "<No matches>"
+			local gemText = gemData and gemDisplayName(gemData) or "<No matches>"
 			DrawString(0, y, "LEFT", height - 4, "VAR", gemText)
 			if gemData then
 				if gemData.grantedEffect.support and self.sortCache.canSupport[gemId] then
@@ -547,9 +552,9 @@ function GemSelectClass:AddGemTooltip(gemInstance)
 	local additionalEffects = gemInstance.gemData.additionalGrantedEffects
 	self.tooltip.tooltipHeader = "GEM"
 	if grantedEffect.name:match("^Spectre:") or grantedEffect.name:match("^Companion:") then
-		self.tooltip:AddLine(fontSizeTitle, colorCodes.GEM .. (gemInstance.displayEffect and gemInstance.displayEffect.nameSpec or gemInstance.gemData.name), "FONTIN SC")	
+		self.tooltip:AddLine(fontSizeTitle, colorCodes.GEM .. (gemInstance.displayEffect and gemInstance.displayEffect.nameSpec or gemDisplayName(gemInstance.gemData)), "FONTIN SC")
 	else
-		self.tooltip:AddLine(fontSizeTitle, colorCodes.GEM .. gemInstance.gemData.name, "FONTIN SC")
+		self.tooltip:AddLine(fontSizeTitle, colorCodes.GEM .. gemDisplayName(gemInstance.gemData), "FONTIN SC")
 	end
 	self.tooltip:AddSeparator(10)
 	self.tooltip:AddLine(fontSizeBig, colorCodes.NORMAL .. gemInstance.gemData.gemType, "FONTIN SC")
@@ -569,7 +574,7 @@ function GemSelectClass:AddGemTooltip(gemInstance)
 		if not additional.support then
 			if additional.name ~= "" then
 				self.tooltip:AddSeparator(10)
-				self.tooltip:AddLine(fontSizeTitle, colorCodes.GEM .. additional.name, "FONTIN SC")
+				self.tooltip:AddLine(fontSizeTitle, colorCodes.GEM .. (additional.displayName or additional.name), "FONTIN SC")
 			end
 			self.tooltip:AddSeparator(10)
 			self:AddGrantedEffectInfo(gemInstance, additional)
@@ -701,7 +706,8 @@ function GemSelectClass:AddGrantedEffectInfo(gemInstance, grantedEffect, addReq)
 		self.skillsTab.build:AddRequirementsToTooltip(self.tooltip, reqLevel, reqStr, reqDex, reqInt)
 	end
 	if grantedEffect.description then
-		local wrap = main:WrapString(grantedEffect.description, 16, m_max(DrawStringWidth(fontSizeBig, "VAR", gemInstance.gemData.tagString), 400))
+		local description = grantedEffect.displayDescription or grantedEffect.description
+		local wrap = main:WrapString(description, 16, m_max(DrawStringWidth(fontSizeBig, "VAR", gemInstance.gemData.tagString), 400))
 		for _, line in ipairs(wrap) do
 			self.tooltip:AddLine(fontSizeBig, colorCodes.GEMDESCRIPTION..line, "FONTIN ITALIC")
 		end
@@ -714,7 +720,7 @@ function GemSelectClass:AddStatSetInfo(gemInstance, grantedEffect, statSet, noLa
 	local statSetLevel = statSet.levels[displayInstance.level] or statSet.levels[1] or { }
 	if not (index == 1 and statSet.label == grantedEffect.name) and statSet.label ~= "" and not noLabel then
 		self.tooltip:AddSeparator(10)
-		self.tooltip:AddLine(fontSizeTitle, colorCodes.GEM .. statSet.label, "FONTIN SC")
+		self.tooltip:AddLine(fontSizeTitle, colorCodes.GEM .. (loc and loc:Display("skill_stat_set", grantedEffect.name .. ":" .. statSet.label, statSet.label) or statSet.label), "FONTIN SC")
 		self.tooltip:AddSeparator(10)
 	end
 	if statSetLevel.critChance then
@@ -746,14 +752,16 @@ function GemSelectClass:AddStatSetInfo(gemInstance, grantedEffect, statSet, noLa
 					end
 					line = line .. " ^2" .. devText
 				end
-				self.tooltip:AddLine(fontSizeBig, colorCodes.MAGIC .. line, "FONTIN SC", bg)
+				local displayLine = loc and loc:Display("statdesc", line, line) or line
+				self.tooltip:AddLine(fontSizeBig, colorCodes.MAGIC .. displayLine, "FONTIN SC", bg)
 			else
 				if launch.devModeAlt then
 					line = line .. " ^1" .. lineMap[line]
 				end
-				local line = colorCodes.UNSUPPORTED .. line
-				line = main.notSupportedModTooltips and (line .. main.notSupportedTooltipText) or line
-				self.tooltip:AddLine(fontSizeBig, line, "FONTIN SC", bg)
+				local displayLine = loc and loc:Display("statdesc", line, line) or line
+				displayLine = colorCodes.UNSUPPORTED .. displayLine
+				displayLine = main.notSupportedModTooltips and (displayLine .. main.notSupportedTooltipText) or displayLine
+				self.tooltip:AddLine(fontSizeBig, displayLine, "FONTIN SC", bg)
 			end
 		end
 	end
@@ -765,7 +773,7 @@ function GemSelectClass:OnFocusGained()
 	self:UpdateSortCache()
 	self:BuildList("")
 	for index, gemId in pairs(self.list) do
-		if self.gems[gemId].name == self.buf then
+		if self.gems[gemId].name == self.buf or gemDisplayName(self.gems[gemId]) == self.buf then
 			self.selIndex = index
 			self:ScrollSelIntoView()
 			break
@@ -821,7 +829,7 @@ function GemSelectClass:OnKeyDown(key, doubleClick)
 			if self.hoverSel and self.gems[self.list[self.hoverSel]] then
 				self.dropped = false
 				self.selIndex = self.hoverSel
-				self:SetText(self.gems[self.list[self.selIndex]].name)
+				self:SetText(gemDisplayName(self.gems[self.list[self.selIndex]]))
 				self:UpdateGem(false, true)
 				return
 			end
@@ -847,7 +855,7 @@ function GemSelectClass:OnKeyDown(key, doubleClick)
 		elseif key == "DOWN" then
 			if self.selIndex < #self.list and not self.noMatches then
 				self.selIndex = self.selIndex + 1
-				self:SetText(self.gems[self.list[self.selIndex]].name)
+				self:SetText(gemDisplayName(self.gems[self.list[self.selIndex]]))
 				self:UpdateGem()
 				self:ScrollSelIntoView()
 			end
@@ -857,7 +865,7 @@ function GemSelectClass:OnKeyDown(key, doubleClick)
 				if self.selIndex == 0 then
 					self:SetText(self.searchStr)
 				else
-					self:SetText(self.gems[self.list[self.selIndex]].name)
+					self:SetText(gemDisplayName(self.gems[self.list[self.selIndex]]))
 				end
 				self:UpdateGem()
 				self:ScrollSelIntoView()

@@ -982,6 +982,9 @@ data.itemBases = { }
 for _, type in pairs(itemTypes) do
 	LoadModule("Data/Bases/"..type, data.itemBases)
 end
+if loc then
+	loc:DecorateData(data)
+end
 
 -- Build lists of item bases, separated by type
 data.itemBaseLists = { }
@@ -992,7 +995,7 @@ for name, base in pairs(data.itemBases) do
 			type = type .. ": " .. base.subType
 		end
 		data.itemBaseLists[type] = data.itemBaseLists[type] or { }
-		table.insert(data.itemBaseLists[type], { label = name:gsub(" %(.+%)",""), name = name, base = base })
+		table.insert(data.itemBaseLists[type], { label = (base.displayName or name):gsub(" %(.+%)",""), name = name, base = base, searchFilter = base.searchText or name })
 	end
 end
 data.itemBaseTypeList = { }

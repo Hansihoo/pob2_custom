@@ -10,6 +10,10 @@ local t_remove = table.remove
 local m_min = math.min
 local m_max = math.max
 
+local function gemDisplayName(gemData, fallback)
+	return gemData and (gemData.displayName or gemData.name) or fallback or ""
+end
+
 local groupSlotDropList = {
 	{ label = "None" },
 	{ label = "Weapon 1", slotName = "Weapon 1" },
@@ -618,7 +622,7 @@ function SkillsTabClass:CreateGemSlot(index)
 		for index2 = index, #self.displayGroup.gemList do
 			-- Update the other gem slot controls
 			local gemInstance = self.displayGroup.gemList[index2]
-			self.gemSlots[index2].nameSpec:SetText(gemInstance.nameSpec)
+			self.gemSlots[index2].nameSpec:SetText(gemDisplayName(gemInstance.gemData, gemInstance.nameSpec))
 			self.gemSlots[index2].level:SetText(gemInstance.level)
 			self.gemSlots[index2].quality:SetText(gemInstance.quality)
 			self.gemSlots[index2].enabled.state = gemInstance.enabled
@@ -975,7 +979,21 @@ function SkillsTabClass:FindSkillGem(nameSpec)
 	for i, pattern in ipairs(patternList) do
 		local foundGemData
 		for gemId, gemData in pairs(self.build.data.gems) do
-			if (" "..gemData.name):match(pattern) then
+			if (" "..(gemData.searchText or gemData.name)):match(pattern) then
+				if foundGemData then
+					return "Ambiguous gem name '" .. nameSpec .. "': matches '" .. foundGemData.name .. "', '" .. gemData.name .. "'"
+				end
+				foundGemData = gemData
+			end
+		end
+		if foundGemData then
+			return nil, foundGemData
+		end
+	end
+	if loc then
+		local foundGemData
+		for gemId, gemData in pairs(self.build.data.gems) do
+			if loc:SearchMatch(gemData.searchText or gemData.name, nameSpec) then
 				if foundGemData then
 					return "Ambiguous gem name '" .. nameSpec .. "': matches '" .. foundGemData.name .. "', '" .. gemData.name .. "'"
 				end
@@ -1119,7 +1137,7 @@ function SkillsTabClass:SetDisplayGroup(socketGroup)
 		-- Update the gem slot controls
 		self:UpdateGemSlots()
 		for index, gemInstance in pairs(socketGroup.gemList) do
-			self.gemSlots[index].nameSpec:SetText(gemInstance.nameSpec)
+			self.gemSlots[index].nameSpec:SetText(gemDisplayName(gemInstance.gemData, gemInstance.nameSpec))
 			self.gemSlots[index].level:SetText(gemInstance.level)
 			self.gemSlots[index].quality:SetText(gemInstance.quality)
 			self.gemSlots[index].enabled.state = gemInstance.enabled

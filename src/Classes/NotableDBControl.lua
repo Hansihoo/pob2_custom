@@ -12,6 +12,14 @@ local m_floor = math.floor
 local m_huge = math.huge
 local s_format = string.format
 
+local function nodeDisplayName(node)
+	return node.displayName or node.dn
+end
+
+local function nodeStatLine(node, index, line)
+	return node.displayStats and node.displayStats[index] or (loc and loc:Display("tree_sd", tostring(node.id) .. ":" .. index, line) or line)
+end
+
 local emotionList = {"Ire", "Guilt", "Greed", "Paranoia", "Envy", "Disgust", "Despair", "Fear", "Suffering", "Isolation" }
 
 ---@param node table
@@ -105,17 +113,27 @@ function NotableDBClass:DoesNotableMatchFilters(node)
 		local found = false
 		local mode = self.controls.searchMode.selIndex
 		if mode == 1 or mode == 2 then
-			local err, match = PCall(string.matchOrPattern, node.dn:lower(), searchStr)
-			if not err and match then
+			if loc and loc:SearchMatch((node.dn or "") .. " " .. nodeDisplayName(node), self.controls.search.buf) then
 				found = true
+			else
+				local err, match = PCall(string.matchOrPattern, node.dn:lower(), searchStr)
+				if not err and match then
+					found = true
+				end
 			end
 		end
 		if mode == 1 or mode == 3 then
-			for _, line in ipairs(node.sd) do
-				local err, match = PCall(string.matchOrPattern, line:lower(), searchStr)
-				if not err and match then
+			for index, line in ipairs(node.sd) do
+				local displayLine = nodeStatLine(node, index, line)
+				if loc and loc:SearchMatch(line .. " " .. displayLine, self.controls.search.buf) then
 					found = true
 					break
+				else
+					local err, match = PCall(string.matchOrPattern, line:lower(), searchStr)
+					if not err and match then
+						found = true
+						break
+					end
 				end
 			end
 		end
@@ -275,12 +293,12 @@ function NotableDBClass:GetRowValue(column, index, node)
 				local scaledPower = node.measuredPower / self.sortMaxPower
 				local powerRed = scaledPower * (0xFF - 0x80) + 0x80
 				local powerColor = s_format("^x%X8080", powerRed)
-				return powerColor..node.dn
+				return powerColor..nodeDisplayName(node)
 			else
-				return "^x808080"..node.dn
+				return "^x808080"..nodeDisplayName(node)
 			end
 		else
-			return colorCodes.ENCHANTED..node.dn
+			return colorCodes.ENCHANTED..nodeDisplayName(node)
 		end
 	end
 end
@@ -303,11 +321,11 @@ function NotableDBClass:AddValueTooltip(tooltip, index, node)
 			tooltip:AddLine(16, "")
 			for i, line in ipairs(node.sd) do
 				if line ~= " " and (node.mods[i].extra or not node.mods[i].list) then
-					local line = colorCodes.UNSUPPORTED..line
+					local line = colorCodes.UNSUPPORTED..nodeStatLine(node, i, line)
 					line = main.notSupportedModTooltips and (line .. main.notSupportedTooltipText) or line
 					tooltip:AddLine(16, line)
 				else
-					tooltip:AddLine(16, colorCodes.MAGIC..line)
+					tooltip:AddLine(16, colorCodes.MAGIC..nodeStatLine(node, i, line))
 				end
 			end
 		end

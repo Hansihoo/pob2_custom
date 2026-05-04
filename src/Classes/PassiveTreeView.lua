@@ -14,6 +14,14 @@ local m_floor = math.floor
 local band = AND64 -- bit.band
 local b_rshift = bit.rshift
 
+local function nodeDisplayName(node)
+	return node.displayName or node.dn
+end
+
+local function nodeStatLine(node, index, line)
+	return node.displayStats and node.displayStats[index] or (loc and loc:Display("tree_sd", tostring(node.id) .. ":" .. index, line) or line)
+end
+
 local PassiveTreeViewClass = newClass("PassiveTreeView", function(self)
 	self.ring = NewImageHandle()
 	self.ring:Load("Assets/ring.png", "CLAMP")
@@ -1213,7 +1221,7 @@ function PassiveTreeViewClass:DoesNodeMatchSearchParams(node)
 	end
 
 	-- Check node name
-	err, needMatches = PCall(search, node.dn:lower(), needMatches)
+	err, needMatches = PCall(search, (node.searchText or node.dn):lower(), needMatches)
 	if err then return false end
 	if #needMatches == 0 then
 		return true
@@ -1287,9 +1295,9 @@ function PassiveTreeViewClass:AddNodeName(tooltip, node, build)
 	if node.unlockConstraint then
 		tooltip.tooltipHeader = "ORACLE_" .. tooltip.tooltipHeader
 	end
-	local nodeName = node.dn
+	local nodeName = nodeDisplayName(node)
 	if main.showFlavourText then
-		nodeName = "^xF8E6CA" .. node.dn
+		nodeName = "^xF8E6CA" .. nodeDisplayName(node)
 	end
 	tooltip.center = true
 	tooltip:AddLine(24, nodeName..(launch.devModeAlt and " ["..node.id.."]" or ""), "FONTIN")
@@ -1385,6 +1393,7 @@ function PassiveTreeViewClass:AddNodeTooltip(tooltip, node, build, incSmallPassi
 
 	local function addModInfoToTooltip(node, i, line, localIncEffect)
 		if node.mods[i] then
+			line = nodeStatLine(node, i, line)
 			if launch.devModeAlt and node.mods[i].list then
 				-- Modifier debugging info
 				local modStr

@@ -9,6 +9,14 @@ local t_insert = table.insert
 local m_max = math.max
 local m_floor = math.floor
 
+local function itemDisplayName(item)
+	return loc and loc:Display("item", item.name, item.name) or item.name
+end
+
+local function itemSearchText(item)
+	local baseSearchText = item.base and item.base.searchText or item.baseName
+	return loc and loc:SearchText("item", item.name, item.name, baseSearchText) or item.name
+end
 
 local ItemDBClass = newClass("ItemDBControl", "ListControl", function(self, anchor, rect, itemsTab, db, dbType)
 	self.ListControl(anchor, rect, 16, "VERTICAL", false)
@@ -142,9 +150,13 @@ function ItemDBClass:DoesItemMatchFilters(item)
 		local found = false
 		local mode = self.controls.searchMode.selIndex
 		if mode == 1 or mode == 2 then
-			local err, match = PCall(string.matchOrPattern, item.name:lower(), searchStr)
-			if not err and match then
+			if loc and loc:SearchMatch(itemSearchText(item), self.controls.search.buf) then
 				found = true
+			else
+				local err, match = PCall(string.matchOrPattern, item.name:lower(), searchStr)
+				if not err and match then
+					found = true
+				end
 			end
 		end
 		if mode == 1 or mode == 3 then
@@ -314,7 +326,7 @@ end
 
 function ItemDBClass:GetRowValue(column, index, item)
 	if column == 1 then
-		return colorCodes[item.rarity] .. item.name
+		return colorCodes[item.rarity] .. itemDisplayName(item)
 	end
 end
 
