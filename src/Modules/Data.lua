@@ -984,6 +984,7 @@ for _, type in pairs(itemTypes) do
 end
 if loc then
 	loc:DecorateData(data)
+	loc:WriteRuntimeSmokeReport(data)
 end
 
 -- Build lists of item bases, separated by type

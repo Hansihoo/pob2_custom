@@ -33,6 +33,14 @@ Busted verification can be requested explicitly when Busted is available on PATH
 powershell -ExecutionPolicy Bypass -File tools/verify-localization.ps1 -RunBusted
 ```
 
+Runtime verification can be requested on Windows after the Korean-capable SimpleGraphic runtime is bundled:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/verify-localization.ps1 -RunRuntime
+```
+
+This launches the PoB2 runtime with `POB_LANG=ko-KR`, writes a temporary smoke report from inside the app, and verifies that canonical English fields remain unchanged while Korean display/search fields are generated.
+
 ## Update CSV
 
 Regenerate the managed Korean CSV files from current PoB data:
@@ -62,6 +70,8 @@ $env:POB_LOG_LOCALIZATION = "1"
 ```
 
 For debug language overrides, set `POB_LANG` to `en-US` or `ko-KR`. `ko-KR` is only honored when the runtime reports Korean text rendering support through `GetRuntimeFeature("unicodeText")` or `CanRenderText("한글")`; otherwise the UI safely falls back to English.
+
+Set `POB_LOCALIZATION_SMOKE_FILE` to an absolute CSV path to make the app write a one-shot runtime localization report after data decoration. This is intended for verification scripts, not normal user configuration.
 
 Docker-based Busted verification can be requested explicitly:
 

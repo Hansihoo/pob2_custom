@@ -431,6 +431,48 @@ function LocalizationClass:DecorateTree(tree)
 	end
 end
 
+function LocalizationClass:WriteRuntimeSmokeReport(gameData)
+	local path = os.getenv("POB_LOCALIZATION_SMOKE_FILE")
+	if not path or path == "" then
+		return
+	end
+
+	local out = io.open(path, "wb")
+	if not out then
+		logLocalization("failed to write runtime smoke report: %s", path)
+		return
+	end
+
+	local function row(key, value)
+		writeEscapedCSVField(out, key)
+		out:write(",")
+		writeEscapedCSVField(out, value)
+		out:write("\n")
+	end
+
+	local sampleGem = gameData and gameData.gems and gameData.gems["Metadata/Items/Gems/SkillGemIceNova"]
+	local sampleBase = gameData and gameData.itemBases and gameData.itemBases["Chain Tiara"]
+
+	row("language", self.language)
+	row("hasUnicode", tostring(self.hasUnicode))
+	row("runtimeReason", self.runtimeReason or "")
+	row("translationFiles", self.stats and self.stats.files or 0)
+	row("translationRows", self.stats and self.stats.rows or 0)
+	if sampleGem then
+		row("sampleGem.name", sampleGem.name)
+		row("sampleGem.displayName", sampleGem.displayName)
+		row("sampleGem.searchText", sampleGem.searchText)
+	end
+	if sampleBase then
+		row("sampleBase.name", sampleBase.name)
+		row("sampleBase.displayName", sampleBase.displayName)
+		row("sampleBase.searchText", sampleBase.searchText)
+	end
+
+	out:close()
+	logLocalization("runtime smoke report written: %s", path)
+end
+
 function LocalizationClass:WriteMissing(userPath)
 	if self.language == "en-US" or #self.missingOrder == 0 then
 		return

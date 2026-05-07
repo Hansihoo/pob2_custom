@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
 	[switch]$RunBusted,
-	[switch]$RunDocker
+	[switch]$RunDocker,
+	[switch]$RunRuntime
 )
 
 $ErrorActionPreference = "Stop"
@@ -154,6 +155,18 @@ function Invoke-OptionalDocker {
 	}
 }
 
+function Invoke-OptionalRuntimeSmoke {
+	if (-not $RunRuntime) {
+		return
+	}
+
+	Write-Host "Running runtime localization smoke verification..."
+	& powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "tools/verify-localization-runtime.ps1")
+	if ($LASTEXITCODE -ne 0) {
+		throw "Runtime localization smoke verification failed"
+	}
+}
+
 $syntaxFiles = @(
 	"src/Modules/Localization.lua",
 	"src/Modules/Main.lua",
@@ -202,5 +215,6 @@ finally {
 
 Invoke-OptionalBusted
 Invoke-OptionalDocker
+Invoke-OptionalRuntimeSmoke
 
 Write-Host "Localization verification passed"

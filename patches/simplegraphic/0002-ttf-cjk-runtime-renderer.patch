@@ -395,19 +395,74 @@ index 07fdda8..0c9f519 100644
  }
  
 diff --git a/ui_api.cpp b/ui_api.cpp
-index 660f44e..deccdd1 100644
+index 660f44e..5e6adfa 100644
 --- a/ui_api.cpp
 +++ b/ui_api.cpp
-@@ -2174,7 +2174,7 @@ SG_LUA_CPP_FUN_BEGIN(GetRuntimeFeature)
- 		supported = true;
- 	}
- 	else if (feature == "unicodeText" || feature == "cjkText" || feature == "ttfText") {
+@@ -6,16 +6,34 @@
+ 
+ #include "ui_local.h"
+ 
+-#include <filesystem>
+-#include <fstream>
+-#include <zlib.h>
+-#include <cmath>
+-
+-#include "core/core_tex_manipulation.h"
+-
+-/* OnFrame()
+-** OnChar("<char>")
+-** OnKeyDown("<keyName>")
++#include <filesystem>
++#include <fstream>
++#include <zlib.h>
++#include <cmath>
++
++#include "core/core_tex_manipulation.h"
++
++namespace {
++bool RuntimeUnicodeFontPackageAvailable()
++{
++	return std::filesystem::exists(std::filesystem::u8path(CFG_DATAPATH "Fonts/NotoSansCJKkr-Regular.otf"));
++}
++
++bool RuntimeCanRenderTextBeforeRenderer(std::string_view text)
++{
++	// ASCII stays covered by the bundled bitmap fonts. Non-ASCII text needs the runtime font package.
++	for (unsigned char ch : text) {
++		if (ch >= 0x80) {
++			return RuntimeUnicodeFontPackageAvailable();
++		}
++	}
++	return true;
++}
++}
++
++/* OnFrame()
++** OnChar("<char>")
++** OnKeyDown("<keyName>")
+ ** OnKeyUp("<keyName>")
+ ** canExit = CanExit()
+ ** OnExit()
+@@ -2170,12 +2188,12 @@ SG_LUA_CPP_FUN_BEGIN(GetRuntimeFeature)
+ 	auto feature = reader.ArgToString(1);
+ 
+ 	bool supported = false;
+-	if (feature == "bitmapText" || feature == "asciiText") {
+-		supported = true;
+-	}
+-	else if (feature == "unicodeText" || feature == "cjkText" || feature == "ttfText") {
 -		supported = false;
-+		supported = ui->renderer && ui->renderer->HasUnicodeTextSupport();
- 	}
+-	}
++	if (feature == "bitmapText" || feature == "asciiText") {
++		supported = true;
++	}
++	else if (feature == "unicodeText" || feature == "cjkText" || feature == "ttfText") {
++		supported = (ui->renderer && ui->renderer->HasUnicodeTextSupport()) || RuntimeUnicodeFontPackageAvailable();
++	}
  
  	lua_pushboolean(L, supported);
-@@ -2189,13 +2189,7 @@ SG_LUA_CPP_FUN_BEGIN(CanRenderText)
+ 	return 1;
+@@ -2189,13 +2207,7 @@ SG_LUA_CPP_FUN_BEGIN(CanRenderText)
  	ui->LExpect(L, lua_gettop(L) >= 1, "Usage: CanRenderText(text)");
  	auto text = reader.ArgToString(1);
  
@@ -418,7 +473,7 @@ index 660f44e..deccdd1 100644
 -			break;
 -		}
 -	}
-+	bool supported = ui->renderer && ui->renderer->CanRenderText(text.data());
++	bool supported = ui->renderer ? ui->renderer->CanRenderText(text.data()) : RuntimeCanRenderTextBeforeRenderer(text);
  
  	lua_pushboolean(L, supported);
  	return 1;

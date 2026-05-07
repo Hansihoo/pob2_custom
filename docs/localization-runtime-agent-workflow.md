@@ -360,9 +360,7 @@ Fix:
 Review:
 
 ```powershell
-$env:POB_LANG = "ko-KR"
-$env:POB_LOG_LOCALIZATION = "1"
-.\PathOfBuilding.exe
+powershell -ExecutionPolicy Bypass -File tools/verify-localization-runtime.ps1
 ```
 
 산출물:
@@ -408,7 +406,7 @@ Fix:
 Review:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/verify-localization.ps1
+powershell -ExecutionPolicy Bypass -File tools/verify-localization.ps1 -RunRuntime
 ```
 
 산출물:
