@@ -1,0 +1,436 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index b992d62..9650263 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -119,6 +119,7 @@ target_include_directories(SimpleGraphic
+ find_package(unofficial-angle CONFIG REQUIRED)
+ find_package(CURL CONFIG REQUIRED)
+ find_package(fmt CONFIG REQUIRED)
++find_package(Freetype REQUIRED)
+ find_package(glfw3 CONFIG REQUIRED)
+ find_package(gli CONFIG REQUIRED)
+ find_package(LuaJIT REQUIRED)
+@@ -230,6 +231,7 @@ target_link_libraries(SimpleGraphic
+     unofficial::angle::libGLESv2
+     cmp_core
+     fmt::fmt
++    Freetype::Freetype
+     glfw
+     gli
+     glm::glm
+diff --git a/engine/render.h b/engine/render.h
+index 0bb3681..abdeb99 100644
+--- a/engine/render.h
++++ b/engine/render.h
+@@ -103,6 +103,8 @@ public:
+ 	virtual void	DrawStringFormat(float x, float y, int align, int height, const col4_t col, int font, const char* fmt, ...) = 0;
+ 	virtual int		DrawStringWidth(int height, int font, const char* str) = 0;
+ 	virtual int		DrawStringCursorIndex(int height, int font, const char* str, int curX, int curY) = 0;
++	virtual bool	HasUnicodeTextSupport() = 0;
++	virtual bool	CanRenderText(const char* str) = 0;
+ 
+ 	virtual int		VirtualScreenWidth() = 0;
+ 	virtual int		VirtualScreenHeight() = 0;
+diff --git a/engine/render/r_font.cpp b/engine/render/r_font.cpp
+index 90375b3..21556fe 100644
+--- a/engine/render/r_font.cpp
++++ b/engine/render/r_font.cpp
+@@ -7,11 +7,19 @@
+ #include "r_local.h"
+ 
+ #include <fmt/format.h>
++#include <algorithm>
++#include <filesystem>
+ #include <iostream>
+ #include <fstream>
++#include <map>
++#include <memory>
+ #include <string>
++#include <vector>
+ #include <cmath>
+ 
++#include <ft2build.h>
++#include FT_FREETYPE_H
++
+ // =======
+ // Classes
+ // =======
+@@ -43,6 +51,63 @@ struct f_fontHeight_s {
+ 	}
+ };
+ 
++struct f_runtimeGlyph_s {
++	r_tex_c* tex = nullptr;
++	int width = 0;
++	int height = 0;
++	int bearingX = 0;
++	int bearingY = 0;
++	int advance = 0;
++	bool valid = false;
++};
++
++struct f_runtimeFont_s {
++	FT_Library library = nullptr;
++	FT_Face face = nullptr;
++	bool ready = false;
++	std::map<int, std::map<char32_t, std::unique_ptr<f_runtimeGlyph_s>>> glyphsByHeight;
++
++	f_runtimeFont_s(r_renderer_c* renderer)
++	{
++		auto fontPath = std::filesystem::u8path(CFG_DATAPATH "Fonts/NotoSansCJKkr-Regular.otf");
++		if (!std::filesystem::exists(fontPath)) {
++			return;
++		}
++		if (FT_Init_FreeType(&library)) {
++			renderer->sys->con->Warning("failed to initialize FreeType");
++			return;
++		}
++		auto path = fontPath.generic_u8string();
++		if (FT_New_Face(library, path.c_str(), 0, &face)) {
++			renderer->sys->con->Warning("failed to load runtime font '%s'", path.c_str());
++			FT_Done_FreeType(library);
++			library = nullptr;
++			return;
++		}
++		ready = true;
++	}
++
++	~f_runtimeFont_s()
++	{
++		for (auto& sizeEntry : glyphsByHeight) {
++			for (auto& glyphEntry : sizeEntry.second) {
++				delete glyphEntry.second->tex;
++			}
++		}
++		if (face) {
++			FT_Done_Face(face);
++		}
++		if (library) {
++			FT_Done_FreeType(library);
++		}
++	}
++
++	bool HasGlyph(char32_t cp) const
++	{
++		return ready && FT_Get_Char_Index(face, static_cast<FT_ULong>(cp)) != 0;
++	}
++};
++
+ // ===========
+ // Font Loader
+ // ===========
+@@ -112,6 +177,8 @@ r_font_c::r_font_c(r_renderer_c* renderer, const char* fontName)
+ 			}
+ 		}
+ 	}
++
++	runtimeFont = new f_runtimeFont_s(renderer);
+ }
+ 
+ r_font_c::~r_font_c()
+@@ -122,6 +189,7 @@ r_font_c::~r_font_c()
+ 		delete fontHeights[i];
+ 	}
+ 	delete fontHeightMap;
++	delete runtimeFont;
+ }
+ 
+ // =============
+@@ -140,6 +208,87 @@ std::u32string BuildTofuString(char32_t cp) {
+ 
+ int const tofuSizeReduction = 3;
+ 
++bool r_font_c::HasRuntimeUnicodeFont() const
++{
++	return runtimeFont && runtimeFont->ready;
++}
++
++bool r_font_c::CanRenderCodepoint(char32_t cp) const
++{
++	if (cp == U'\n' || cp == U'\t') {
++		return true;
++	}
++	if (numFontHeight > 0 && cp < (unsigned)fontHeights[0]->numGlyph) {
++		return true;
++	}
++	return runtimeFont && runtimeFont->HasGlyph(cp);
++}
++
++bool r_font_c::CanRenderText(std::u32string_view str) const
++{
++	for (size_t idx = 0; idx < str.size();) {
++		int escLen = IsColorEscape(str.substr(idx));
++		if (escLen) {
++			idx += escLen;
++			continue;
++		}
++		if (!CanRenderCodepoint(str[idx])) {
++			return false;
++		}
++		++idx;
++	}
++	return true;
++}
++
++f_runtimeGlyph_s* r_font_c::GetRuntimeGlyph(int height, char32_t cp)
++{
++	if (!runtimeFont || !runtimeFont->ready || !runtimeFont->HasGlyph(cp)) {
++		return nullptr;
++	}
++
++	height = (std::max)(height, 1);
++	auto& glyphByCodepoint = runtimeFont->glyphsByHeight[height];
++	auto& glyph = glyphByCodepoint[cp];
++	if (glyph) {
++		return glyph.get();
++	}
++
++	glyph = std::make_unique<f_runtimeGlyph_s>();
++	if (FT_Set_Pixel_Sizes(runtimeFont->face, 0, static_cast<FT_UInt>(height))) {
++		return glyph.get();
++	}
++	if (FT_Load_Char(runtimeFont->face, static_cast<FT_ULong>(cp), FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL)) {
++		return glyph.get();
++	}
++
++	auto slot = runtimeFont->face->glyph;
++	auto& bitmap = slot->bitmap;
++	glyph->width = static_cast<int>(bitmap.width);
++	glyph->height = static_cast<int>(bitmap.rows);
++	glyph->bearingX = slot->bitmap_left;
++	glyph->bearingY = slot->bitmap_top;
++	glyph->advance = static_cast<int>((slot->advance.x + 32) >> 6);
++	glyph->valid = true;
++
++	if (bitmap.width > 0 && bitmap.rows > 0 && bitmap.pixel_mode == FT_PIXEL_MODE_GRAY) {
++		std::vector<byte> pixels(bitmap.width * bitmap.rows);
++		int pitch = bitmap.pitch;
++		for (unsigned int row = 0; row < bitmap.rows; ++row) {
++			auto* dst = pixels.data() + row * bitmap.width;
++			auto* src = pitch >= 0
++				? bitmap.buffer + row * pitch
++				: bitmap.buffer + (bitmap.rows - 1 - row) * -pitch;
++			memcpy(dst, src, bitmap.width);
++		}
++		auto raw = std::make_unique<image_c>();
++		if (raw->CopyRaw(IMGTYPE_GRAY, bitmap.width, bitmap.rows, pixels.data())) {
++			glyph->tex = new r_tex_c(renderer->texMan, std::move(raw), TF_NOMIPMAP | TF_CLAMP);
++		}
++	}
++
++	return glyph.get();
++}
++
+ int r_font_c::StringWidthInternal(f_fontHeight_s* fh, std::u32string_view str, int height, float scale)
+ {
+ 	int heightIdx = (int)(std::find(fontHeights, fontHeights + numFontHeight, fh) - fontHeights);
+@@ -158,11 +307,18 @@ int r_font_c::StringWidthInternal(f_fontHeight_s* fh, std::u32string_view str, i
+ 			idx += escLen;
+ 		}
+ 		else if (ch >= (unsigned)fh->numGlyph) {
+-			auto tofu = BuildTofuString(ch);
+-			for (auto cp : tofu) {
+-				width += measureCodepoint(tofuFont.fh, cp);
++			auto runtimeGlyph = GetRuntimeGlyph(height, ch);
++			if (runtimeGlyph && runtimeGlyph->valid) {
++				width += runtimeGlyph->advance;
+ 				width = std::ceil(width);
+ 			}
++			else {
++				auto tofu = BuildTofuString(ch);
++				for (auto cp : tofu) {
++					width += measureCodepoint(tofuFont.fh, cp);
++					width = std::ceil(width);
++				}
++			}
+ 			++idx;
+ 		}
+ 		else if (ch == U'\t') {
+@@ -222,12 +378,22 @@ size_t r_font_c::StringCursorInternal(f_fontHeight_s* fh, std::u32string_view st
+ 			I += escLen;
+ 		}
+ 		else if (*I >= (unsigned)fh->numGlyph) {
+-			auto tofu = BuildTofuString(*I);
+-			for (auto cp : tofu) {
+-				x += measureCodepoint(tofuFont.fh, cp);
++			auto runtimeGlyph = GetRuntimeGlyph(height, *I);
++			if (runtimeGlyph && runtimeGlyph->valid) {
++				x += runtimeGlyph->advance;
+ 				x = std::ceil(x);
+ 				if (curX <= x) {
+-					return std::distance(str.begin(), I);
++					break;
++				}
++			}
++			else {
++				auto tofu = BuildTofuString(*I);
++				for (auto cp : tofu) {
++					x += measureCodepoint(tofuFont.fh, cp);
++					x = std::ceil(x);
++					if (curX <= x) {
++						return std::distance(str.begin(), I);
++					}
+ 				}
+ 			}
+ 			++I;
+@@ -394,14 +560,43 @@ void r_font_c::DrawTextLine(scp_t pos, int align, int height, col4_t col, std::u
+ 		x = std::ceil(x);
+ 	};
+ 
++	auto drawRuntimeGlyph = [this, &curTex, &x, y, height](f_runtimeGlyph_s* glyph) {
++		float glyphX = x + glyph->bearingX;
++		float glyphY = y + std::ceil(height * 0.85f) - glyph->bearingY;
++		if (glyph->tex && glyph->width > 0 && glyph->height > 0) {
++			if (curTex != glyph->tex) {
++				curTex = glyph->tex;
++				renderer->curLayer->Bind(glyph->tex);
++			}
++			float w = static_cast<float>(glyph->width);
++			float h = static_cast<float>(glyph->height);
++			if (glyphX + w >= 0 && glyphX < renderer->VirtualScreenWidth()) {
++				renderer->curLayer->Quad(
++					0.0f, 0.0f, glyphX, glyphY,
++					1.0f, 0.0f, glyphX + w, glyphY,
++					1.0f, 1.0f, glyphX + w, glyphY + h,
++					0.0f, 1.0f, glyphX, glyphY + h
++				);
++			}
++		}
++		x += glyph->advance;
++		x = std::ceil(x);
++	};
++
+ 	// Render the string
+ 	for (auto tail = str; !tail.empty();) {
+ 		// Draw unprintable characters as tofu placeholders
+ 		auto ch = tail[0];
+ 		if (ch >= (unsigned)fh->numGlyph) {
+-			auto tofu = BuildTofuString(ch);
+-			for (auto ch : tofu) {
+-				drawCodepoint(tofuFont.fh, tofuFont.fh->height, 1.0f, tofuFont.yPad, ch);
++			auto runtimeGlyph = GetRuntimeGlyph(height, ch);
++			if (runtimeGlyph && runtimeGlyph->valid) {
++				drawRuntimeGlyph(runtimeGlyph);
++			}
++			else {
++				auto tofu = BuildTofuString(ch);
++				for (auto ch : tofu) {
++					drawCodepoint(tofuFont.fh, tofuFont.fh->height, 1.0f, tofuFont.yPad, ch);
++				}
+ 			}
+ 			tail = tail.substr(1);
+ 			continue;
+diff --git a/engine/render/r_font.h b/engine/render/r_font.h
+index cbae830..f1edb50 100644
+--- a/engine/render/r_font.h
++++ b/engine/render/r_font.h
+@@ -21,8 +21,12 @@ public:
+ 	void	Draw(scp_t pos, int align, int height, col4_t col, std::u32string_view str);
+ 	void	FDraw(scp_t pos, int align, int height, col4_t col, const char* fmt, ...);
+ 	void	VDraw(scp_t pos, int align, int height, col4_t col, const char* fmt, va_list va);
++	bool	HasRuntimeUnicodeFont() const;
++	bool	CanRenderText(std::u32string_view str) const;
+ 
+ private:
++	struct f_runtimeGlyph_s* GetRuntimeGlyph(int height, char32_t cp);
++	bool	CanRenderCodepoint(char32_t cp) const;
+ 	int		StringWidthInternal(struct f_fontHeight_s* fh, std::u32string_view str, int height, float scale);
+ 	size_t	StringCursorInternal(struct f_fontHeight_s* fh, std::u32string_view str, int height, float scale, int curX);
+ 	void	DrawTextLine(scp_t pos, int align, int height, col4_t col, std::u32string_view str);
+@@ -44,4 +48,5 @@ private:
+ 	struct f_fontHeight_s *fontHeights[32] = {};
+ 	int		maxHeight = 0;
+ 	int*	fontHeightMap = nullptr;
++	struct f_runtimeFont_s* runtimeFont = nullptr;
+ };
+diff --git a/engine/render/r_main.cpp b/engine/render/r_main.cpp
+index 1d46715..9ed2a56 100644
+--- a/engine/render/r_main.cpp
++++ b/engine/render/r_main.cpp
+@@ -1859,6 +1859,20 @@ int r_renderer_c::DrawStringCursorIndex(int height, int font, const char* str, i
+ 	return (int)narrowView.size();
+ }
+ 
++bool r_renderer_c::HasUnicodeTextSupport()
++{
++	return fonts[F_VAR] && fonts[F_VAR]->HasRuntimeUnicodeFont();
++}
++
++bool r_renderer_c::CanRenderText(const char* str)
++{
++	if (!str || !fonts[F_VAR]) {
++		return false;
++	}
++	auto idxStr = IndexUTF8ToUTF32(str);
++	return fonts[F_VAR]->CanRenderText(idxStr.text);
++}
++
+ // ==============
+ // Virtual screen
+ // ==============
+diff --git a/engine/render/r_main.h b/engine/render/r_main.h
+index f7072fb..ff329e0 100644
+--- a/engine/render/r_main.h
++++ b/engine/render/r_main.h
+@@ -96,6 +96,8 @@ public:
+ 	void	DrawStringFormat(float x, float y, int align, int height, const col4_t col, int font, const char* fmt, ...);
+ 	int		DrawStringWidth(int height, int font, const char* str);
+ 	int		DrawStringCursorIndex(int height, int font, const char* str, int curX, int curY);
++	bool	HasUnicodeTextSupport();
++	bool	CanRenderText(const char* str);
+ 
+ 	int		VirtualScreenWidth();
+ 	int		VirtualScreenHeight();
+diff --git a/engine/render/r_texture.cpp b/engine/render/r_texture.cpp
+index 07fdda8..0c9f519 100644
+--- a/engine/render/r_texture.cpp
++++ b/engine/render/r_texture.cpp
+@@ -311,7 +311,7 @@ r_tex_c::r_tex_c(r_ITexManager* manager, std::unique_ptr<image_c> img, int flags
+ 	Init(manager, {}, flags);
+ 
+ 	// Direct upload
+-	img = BuildMipSet(std::move(img));
++	this->img = BuildMipSet(std::move(img));
+ 	PerformUpload(this);
+ }
+ 
+diff --git a/ui_api.cpp b/ui_api.cpp
+index 660f44e..deccdd1 100644
+--- a/ui_api.cpp
++++ b/ui_api.cpp
+@@ -2174,7 +2174,7 @@ SG_LUA_CPP_FUN_BEGIN(GetRuntimeFeature)
+ 		supported = true;
+ 	}
+ 	else if (feature == "unicodeText" || feature == "cjkText" || feature == "ttfText") {
+-		supported = false;
++		supported = ui->renderer && ui->renderer->HasUnicodeTextSupport();
+ 	}
+ 
+ 	lua_pushboolean(L, supported);
+@@ -2189,13 +2189,7 @@ SG_LUA_CPP_FUN_BEGIN(CanRenderText)
+ 	ui->LExpect(L, lua_gettop(L) >= 1, "Usage: CanRenderText(text)");
+ 	auto text = reader.ArgToString(1);
+ 
+-	bool supported = true;
+-	for (unsigned char ch : text) {
+-		if (ch >= 0x80) {
+-			supported = false;
+-			break;
+-		}
+-	}
++	bool supported = ui->renderer && ui->renderer->CanRenderText(text.data());
+ 
+ 	lua_pushboolean(L, supported);
+ 	return 1;
+diff --git a/vcpkg.json b/vcpkg.json
+index 2e4efdd..6728c34 100644
+--- a/vcpkg.json
++++ b/vcpkg.json
+@@ -5,6 +5,7 @@
+     "angle",
+     "curl",
+     "fmt",
++    "freetype",
+     "glfw3",
+     "gli",
+     "libwebp",
