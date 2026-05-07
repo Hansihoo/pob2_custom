@@ -229,12 +229,69 @@ function LocalizationClass:SetLanguage(language, allowWithoutUnicode)
 		language = "en-US"
 	end
 	if language == "ko-KR" and not allowWithoutUnicode and not self.hasUnicode then
+		logLocalization("language=ko-KR rejected runtime=%s", self.runtimeReason or "unknown")
 		language = "en-US"
 	end
 	if language == "ko-KR" and not self:HasLanguage(language) then
+		logLocalization("language=ko-KR rejected missing translations")
 		language = "en-US"
 	end
 	return self:LoadLanguage(language)
+end
+
+function LocalizationClass:DetectRuntimeCapabilities()
+	local hasFeatureAPI = type(GetRuntimeFeature) == "function"
+	local hasRenderAPI = type(CanRenderText) == "function"
+	local legacyUtf8 = type(_G.utf8) == "table"
+	local unicodeText = false
+	local canRenderKorean = false
+	local reason = "no runtime unicode capability"
+
+	if hasFeatureAPI then
+		local ok, value = pcall(GetRuntimeFeature, "unicodeText")
+		unicodeText = ok and value == true
+		if unicodeText then
+			reason = "GetRuntimeFeature(unicodeText)"
+		else
+			reason = "GetRuntimeFeature(unicodeText)=false"
+		end
+	end
+
+	if hasRenderAPI then
+		local ok, value = pcall(CanRenderText, "\237\149\156\234\184\128")
+		canRenderKorean = ok and value == true
+		if canRenderKorean then
+			reason = "CanRenderText(korean)=true"
+		elseif not hasFeatureAPI then
+			reason = "CanRenderText(korean)=false"
+		end
+	end
+
+	if not hasFeatureAPI and not hasRenderAPI and legacyUtf8 then
+		canRenderKorean = true
+		reason = "legacy _G.utf8"
+	end
+
+	local supported = unicodeText or canRenderKorean
+	logLocalization(
+		"runtime unicodeText=%s canRenderKorean=%s legacyUtf8=%s featureAPI=%s renderAPI=%s reason=%s",
+		tostring(unicodeText),
+		tostring(canRenderKorean),
+		tostring(legacyUtf8),
+		tostring(hasFeatureAPI),
+		tostring(hasRenderAPI),
+		reason
+	)
+
+	return {
+		hasFeatureAPI = hasFeatureAPI,
+		hasRenderAPI = hasRenderAPI,
+		legacyUtf8 = legacyUtf8,
+		unicodeText = unicodeText,
+		canRenderKorean = canRenderKorean,
+		supported = supported,
+		reason = reason,
+	}
 end
 
 function LocalizationClass:RecordMissing(domain, key, fallback)
@@ -401,9 +458,8 @@ function LocalizationClass:WriteMissing(userPath)
 end
 
 local requestedLanguage = os.getenv("POB_LANG")
-local hasUnicode = type(_G.utf8) == "table"
 loc = setmetatable({
-	hasUnicode = hasUnicode,
+	hasUnicode = false,
 	language = "en-US",
 	translations = { },
 	aliases = { },
@@ -411,11 +467,15 @@ loc = setmetatable({
 	missingOrder = { },
 }, LocalizationClass)
 
+loc.runtime = loc:DetectRuntimeCapabilities()
+loc.hasUnicode = loc.runtime.supported
+loc.runtimeReason = loc.runtime.reason
+
 if requestedLanguage == "en-US" then
 	loc:SetLanguage("en-US", true)
 elseif requestedLanguage == "ko-KR" then
-	loc:SetLanguage("ko-KR", true)
-elseif hasUnicode and loc:HasLanguage("ko-KR") then
+	loc:SetLanguage("ko-KR")
+elseif loc.hasUnicode and loc:HasLanguage("ko-KR") then
 	loc:SetLanguage("ko-KR")
 else
 	loc:SetLanguage("en-US", true)

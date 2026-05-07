@@ -23,6 +23,7 @@ This checks Lua syntax for the localization touch points, then runs a standalone
 - CSV synchronization with the current generated PoB data
 - UTF-8 CSV parsing, BOM handling, quoted commas, and escaped quotes
 - English fallback
+- Runtime capability gating for Korean display, including default English fallback when CJK rendering is unavailable
 - Korean display/search fields for a sample gem, item base, and passive tree node
 - Canonical English keys staying unchanged
 
@@ -59,6 +60,8 @@ Runtime localization logs can be enabled for development:
 ```powershell
 $env:POB_LOG_LOCALIZATION = "1"
 ```
+
+For debug language overrides, set `POB_LANG` to `en-US` or `ko-KR`. `ko-KR` is only honored when the runtime reports Korean text rendering support through `GetRuntimeFeature("unicodeText")` or `CanRenderText("한글")`; otherwise the UI safely falls back to English.
 
 Docker-based Busted verification can be requested explicitly:
 

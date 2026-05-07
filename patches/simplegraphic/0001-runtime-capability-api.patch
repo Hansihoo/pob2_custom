@@ -1,0 +1,69 @@
+diff --git a/ui_api.cpp b/ui_api.cpp
+index 6008350..660f44e 100644
+--- a/ui_api.cpp
++++ b/ui_api.cpp
+@@ -67,6 +67,8 @@
+ ** index = DrawStringCursorIndex(height, font{"FIXED"|"VAR"|"VAR BOLD"|"FONTIN SC"|"FONTIN SC ITALIC"|"FONTIN"|"FONTIN ITALIC"}, "<text>", cursorX, cursorY)
+ ** str = StripEscapes("<string>")
+ ** count = GetAsyncCount()
++** supported = GetRuntimeFeature("<featureName>")
++** supported = CanRenderText("<text>")
+ **
+ ** searchHandle = NewFileSearch("<spec>"[, findDirectories])
+ ** found = searchHandle:NextFile()
+@@ -2160,6 +2162,46 @@ static int l_SetForeground(lua_State* L)
+ 	return 0;
+ }
+ 
++SG_LUA_CPP_FUN_BEGIN(GetRuntimeFeature)
++{
++	ui_main_c* ui = GetUIPtr(L);
++	ui_luaReader_c reader(ui, L, "GetRuntimeFeature");
++	ui->LExpect(L, lua_gettop(L) >= 1, "Usage: GetRuntimeFeature(featureName)");
++	auto feature = reader.ArgToString(1);
++
++	bool supported = false;
++	if (feature == "bitmapText" || feature == "asciiText") {
++		supported = true;
++	}
++	else if (feature == "unicodeText" || feature == "cjkText" || feature == "ttfText") {
++		supported = false;
++	}
++
++	lua_pushboolean(L, supported);
++	return 1;
++}
++SG_LUA_CPP_FUN_END()
++
++SG_LUA_CPP_FUN_BEGIN(CanRenderText)
++{
++	ui_main_c* ui = GetUIPtr(L);
++	ui_luaReader_c reader(ui, L, "CanRenderText");
++	ui->LExpect(L, lua_gettop(L) >= 1, "Usage: CanRenderText(text)");
++	auto text = reader.ArgToString(1);
++
++	bool supported = true;
++	for (unsigned char ch : text) {
++		if (ch >= 0x80) {
++			supported = false;
++			break;
++		}
++	}
++
++	lua_pushboolean(L, supported);
++	return 1;
++}
++SG_LUA_CPP_FUN_END()
++
+ // ==============================
+ // Library and API Initialisation
+ // ==============================
+@@ -2340,6 +2382,8 @@ int ui_main_c::InitAPI(lua_State* L)
+ 	ADDFUNC(Restart);
+ 	ADDFUNC(Exit);
+ 	ADDFUNC(SetForeground);
++	ADDFUNC(GetRuntimeFeature);
++	ADDFUNC(CanRenderText);
+ 	lua_getglobal(L, "os");
+ 	lua_pushcfunction(L, l_Exit);
+ 	lua_setfield(L, -2, "exit");

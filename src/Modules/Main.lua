@@ -284,10 +284,9 @@ the "Releases" section of the GitHub page.]])
 end
 
 function main:DetectUnicodeSupport()
-	-- PoeCharm has utf8 global that normal PoB doesn't have
-	self.unicode = type(_G.utf8) == "table"
+	self.unicode = loc and loc.hasUnicode or false
 	if self.unicode then
-		ConPrintf("Unicode support detected")
+		ConPrintf("Unicode text rendering support detected")
 	end
 end
 

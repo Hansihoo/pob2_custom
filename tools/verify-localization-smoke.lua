@@ -14,6 +14,12 @@ local function expectTrue(label, value)
 	end
 end
 
+local function expectFalse(label, value)
+	if value then
+		fail(label .. ": expected false")
+	end
+end
+
 local function expectNil(label, value)
 	if value ~= nil then
 		fail(string.format("%s: expected nil, got '%s'", label, tostring(value)))
@@ -21,6 +27,14 @@ local function expectNil(label, value)
 end
 
 _G.utf8 = { }
+
+function GetRuntimeFeature(name)
+	return name == "unicodeText"
+end
+
+function CanRenderText(text)
+	return text ~= nil and text ~= ""
+end
 
 local localizationLogs = { }
 function ConPrintf(format, ...)
@@ -56,10 +70,44 @@ function LoadModule(fileName, ...)
 end
 
 local loc = LoadModule("Modules/Localization")
+expectTrue("runtime capability API detected", loc.runtime.hasFeatureAPI)
+expectTrue("runtime render API detected", loc.runtime.hasRenderAPI)
+expectTrue("runtime Korean support detected", loc.hasUnicode)
 expectEqual("default language", "ko-KR", loc.language)
 expectTrue("translation files loaded", loc.stats.files > 0)
 expectTrue("translation rows loaded", loc.stats.rows > 0)
 expectTrue("translations loaded", loc.stats.translations > 0)
+
+local originalGetRuntimeFeature = GetRuntimeFeature
+local originalCanRenderText = CanRenderText
+local originalHasUnicode = loc.hasUnicode
+local originalRuntimeReason = loc.runtimeReason
+
+GetRuntimeFeature = function()
+	return false
+end
+CanRenderText = function()
+	return false
+end
+local blockedRuntime = loc:DetectRuntimeCapabilities()
+expectFalse("blocked runtime Korean support", blockedRuntime.supported)
+loc.hasUnicode = false
+loc.runtimeReason = blockedRuntime.reason
+loc:SetLanguage("ko-KR")
+expectEqual("unsupported runtime language fallback", "en-US", loc.language)
+
+GetRuntimeFeature = nil
+CanRenderText = nil
+local legacyRuntime = loc:DetectRuntimeCapabilities()
+expectTrue("legacy utf8 runtime support", legacyRuntime.supported)
+
+GetRuntimeFeature = originalGetRuntimeFeature
+CanRenderText = originalCanRenderText
+loc.hasUnicode = originalHasUnicode
+loc.runtimeReason = originalRuntimeReason
+loc:SetLanguage("ko-KR")
+expectEqual("restored runtime language", "ko-KR", loc.language)
+
 if os.getenv("POB_LOG_LOCALIZATION") == "1" then
 	expectTrue("localization load log emitted", #localizationLogs > 0)
 end
